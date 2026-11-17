@@ -1,0 +1,56 @@
+# UNTESTED: Docker was not available on the author's machine when this was written.
+# Local development stack: Postgres + migrations + API + worker.
+#
+#   WEBHOOK_SECRET=$(openssl rand -hex 32) docker compose up --build
+#
+# The database credentials below are throwaway LOCAL-ONLY values for the
+# container; real (Neon) credentials live in .env and are never committed.
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql://reminder:reminder@db:5432/reminder
+  DATABASE_URL_DIRECT: postgresql://reminder:reminder@db:5432/reminder
+  WEBHOOK_SECRET: ${WEBHOOK_SECRET:?set WEBHOOK_SECRET in your shell or a .env file}
+  LOG_LEVEL: INFO
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: reminder
+      POSTGRES_PASSWORD: reminder
+      POSTGRES_DB: reminder
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reminder"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+
+  migrate:
+    build: .
+    command: ["python", "-m", "app.migrate"]
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: .
+    environment: *app-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build: .
+    command: ["python", "-m", "app.worker"]
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  dbdata:
